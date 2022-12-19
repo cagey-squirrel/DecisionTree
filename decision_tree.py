@@ -1,11 +1,10 @@
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
-from math import log2
 from sklearn.tree import DecisionTreeClassifier
 from sklearn import tree
 import pydot
-from math import ceil, sqrt
+from math import ceil, sqrt, log2
 import sys
 from collections import deque
 
@@ -306,14 +305,14 @@ class BigNode(object):
 
 class DecisionTree(object):
 
-    def __init__(self, impurity_function='gini', discretization_method='dynamic', max_depth=-1, min_leaf_size=-1, k=3, pruning_method=None):
+    def __init__(self, impurity_function='gini', discretization_method='dynamic', max_depth=-1, min_leaf_size=-1, number_of_discr_classes=3, pruning_method=None):
         self.tree_root = None 
         self.impurity_function = impurity_function
         self.number_to_feature_value_mapping = {}
         self.column_index_to_feature_name_mapping = {}
         self.number_to_label_value_mapping = {}
         self.discretization_method = discretization_method
-        self.k = k
+        self.number_of_discr_classes = number_of_discr_classes
         self.max_depth = max_depth
         self.min_leaf_size = min_leaf_size
         self.numerical_to_categorical_values_mappings = {}
@@ -418,17 +417,17 @@ class DecisionTree(object):
         self.number_to_label_value_mapping = number_to_label_value_mapping
     
         
-    def split_to_intervals_with_same_length(self, features_df, column_name, k):
+    def split_to_intervals_with_same_length(self, features_df, column_name, number_of_discr_classes):
         feature_column = features_df[column_name]
 
         min_value = feature_column.min()
         max_value = feature_column.max()
 
         split_vectors = []
-        split_size = (max_value - min_value) / k
+        split_size = (max_value - min_value) / number_of_discr_classes
 
         left_split_border = min_value
-        for i in range(k-1):
+        for i in range(number_of_discr_classes-1):
             right_split_border = left_split_border + split_size
 
             if i == 0:
@@ -438,7 +437,7 @@ class DecisionTree(object):
             
             split_vectors.append((split_vector, left_split_border, right_split_border))
 
-            if i == k-2:
+            if i == number_of_discr_classes-2:
                 split_vector = right_split_border < feature_column
                 split_vectors.append((split_vector, left_split_border, right_split_border))
 
@@ -465,7 +464,7 @@ class DecisionTree(object):
         
     
                 
-    def split_to_intervals_with_same_size(self, features_df, column_name, k):
+    def split_to_intervals_with_same_size(self, features_df, column_name, number_of_discr_classes):
  
         features_column = features_df[column_name]
 
@@ -477,10 +476,10 @@ class DecisionTree(object):
 
         split_vectors = []
 
-        number_of_examples_in_split = ceil(m / k)
+        number_of_examples_in_split = ceil(m / number_of_discr_classes)
         left_split_border_value = min_value
 
-        for i in range(k-1):
+        for i in range(number_of_discr_classes-1):
             right_split_border_index = min(number_of_examples_in_split * (i+1), m-1)
             right_split_border_value = sorted_array[right_split_border_index]
 
@@ -492,13 +491,13 @@ class DecisionTree(object):
             #split_vector = np.logical_and(left_split_border_value < features_df, features_df <= right_split_border_value)
             split_vectors.append((split_vector, left_split_border_value, right_split_border_value))
 
-            if i == k-2:
+            if i == number_of_discr_classes-2:
                 split_vector = right_split_border_value < features_column
                 split_vectors.append((split_vector, left_split_border_value, right_split_border_value))
 
             left_split_border_value = right_split_border_value
 
-        #a[a == max_value] = k-1
+        #a[a == max_value] = number_of_discr_classes-1
         splitting_borders = []
         values = []
         for split_index, (split_vector, left_split_border, right_split_border) in enumerate(split_vectors):
@@ -629,7 +628,7 @@ class DecisionTree(object):
         #print('\n\n')
         self.numerical_to_categorical_values_mappings[column_name] = splitting_borders
 
-    def change_continuous_to_categorical_values(self, features, labels, k):
+    def change_continuous_to_categorical_values(self, features, labels, number_of_discr_classes):
 
         for column_index, column_name in enumerate(features.columns):
 
@@ -638,9 +637,9 @@ class DecisionTree(object):
             # column is continous if it has more than 5 distinct values
             if len(values) > 5:
                 if self.discretization_method == 'same_length':
-                    self.split_to_intervals_with_same_length(features, column_name, k)
+                    self.split_to_intervals_with_same_length(features, column_name, number_of_discr_classes)
                 if self.discretization_method == 'same_size':
-                    self.split_to_intervals_with_same_size(features, column_name, k)
+                    self.split_to_intervals_with_same_size(features, column_name, number_of_discr_classes)
                 if self.discretization_method == 'dynamic':
                     self.dynamic_split(features, column_name, labels)
 
@@ -794,7 +793,7 @@ class DecisionTree(object):
             data = data.iloc[pruning_data_size:]
             labels = labels.iloc[pruning_data_size:]
 
-        self.change_continuous_to_categorical_values(data, labels, self.k)
+        self.change_continuous_to_categorical_values(data, labels, self.number_of_discr_classes)
 
         #print(data)
 
@@ -897,7 +896,7 @@ def main():
 
     train_features, train_labels, test_features, test_labels = random_test_train_split(features, labels, test_percentage=20)
 
-    decision_tree = DecisionTree(impurity_function='gini', min_leaf_size=-1, discretization_method='same_size', max_depth=-1, k=3, pruning_method="nista")
+    decision_tree = DecisionTree(impurity_function='gini', min_leaf_size=-1, discretization_method='same_size', max_depth=-1, number_of_discr_classes=3, pruning_method="nista")
     decision_tree.train_tree(train_features, train_labels)
     decision_tree.display_tree("pydot_graph_pre_prune.png")
     print('krecem pessimistic')
