@@ -7,35 +7,54 @@ import pydot
 from math import ceil, sqrt, log2
 import sys
 from collections import deque
+from sklearn import preprocessing
+
 
 #np.set_printoptions(threshold=sys.maxsize)
 
 not_observed = 0
 
-def load_data(data_path):
+def load_data(data_path, labels_column_name, id_column_name=None, separator=','):
+    '''
+    Loads data from csv file to a pandas.Dataframe
+    data is split into features (everything except labels) and labels
 
-    data = pd.read_csv(data_path, sep=',')
+    Features are filtered for 'id' column if there exists one in data
 
-    features = data.iloc[:, :-1]
-    labels = (data.iloc[:, -1])
+    Input:
+        -data_path (string): path do .csv file containing data
+    
+    Returns:
+        -features (pandas.Dataframe): features
+        -labels (pandas.Dataframe): labels
+    '''
+    data = pd.read_csv(data_path, sep=separator)
+    
+    features = data.loc[:, data.columns != labels_column_name]
+    
+    labels = (data.loc[:, labels_column_name])
 
-    change_values_into_numbers(features)
-    change_value_into_numbers(labels)
-    features = np.array(features)
-    labels = np.array(labels)
+    if not (id_column_name is None):
+        features = features.loc[:, features.columns != id_column_name]
 
-    return features, labels
-
-def just_load_data(data_path):
-
-    data = pd.read_csv(data_path, sep=',')
-
-    features = data.iloc[:, :-1]
-    labels = (data.iloc[:, -1])
-
+        
     return features, labels
 
 def random_test_train_split(features, labels, test_percentage=20):
+    '''
+    Splits features and labels into training and testing dataset based on test_percentage
+
+    Input:
+        -features (pandas.Dataframe): features
+        -labels (pandas.Dataframe): labels
+        -test_percentage: percentage of data that will go into test dataset, everything else will be used for trainng
+    
+    Returns:
+        train_features (pandas.Dataframe)
+        train_labels (pandas.Dataframe)
+        test_features (pandas.Dataframe)
+        test_labels (pandas.Dataframe)
+    '''
     p = np.random.permutation(len(features))
     features = features.reindex(p)
     labels = labels.reindex(p)
@@ -54,21 +73,7 @@ def random_test_train_split(features, labels, test_percentage=20):
 
     return train_features, train_labels, test_features, test_labels
 
-def change_values_into_numbers(features):
-    for column in features.columns:
-        values = set(features[column])
-        values = sorted(list(values))
-        for i, value in enumerate(values):
-            features.loc[features[column] == value, column] = i
-
-def change_value_into_numbers(features):
-
-    values = set(features)
-    values = sorted(list(values))
-    for i, value in enumerate(values):
-        features[features == value] = i
-
-class BigNode(object):
+class Node(object):
 
     def __init__(self, x, y, features, depth, index=0):
         self.x = x
@@ -76,7 +81,7 @@ class BigNode(object):
         self.features = features
         self.is_terminal = False
         self.my_class = None
-        self.my_split_atribute = None
+        self.my_split_attribute = None
         self.children = {}
         self.children_quantities = {}
         self.index = index
@@ -84,14 +89,22 @@ class BigNode(object):
 
 
     def all_x_have_same_label(self):
+        '''
+        Tests if all remaining examples in dataset have the same label
+        '''
         labels = set(self.y)
         return len(labels) == 1
 
     def no_features_left(self):
+        '''
+        Tests if there are no more features that can be used for split
+        '''
         return len(self.features) == 0
     
     def set_class_to_most_common_label(self):
-        
+        '''
+        Used for impure leaf nodes. Sets their class to be the most frequent class in dataset
+        '''
         self.is_terminal = True
 
         values, counts = np.unique(self.y, return_counts=True)
@@ -103,50 +116,47 @@ class BigNode(object):
         self.my_class = values[ind]
     
     def find_best_feature_for_split_entropy(self):
-
+        '''
+        Finds best attribute for splitting based on entropy
+        Sets self.my_split_attribute to chosen attribute for splitting
+        '''
         feature_entropies = {}
 
         for feature in self.features:
             feature_values = set(self.x[:, feature])
-            #print(f'examining feature {feature}')
+
             total_num_of_examples = self.x.shape[0]
             total_feature_entropy = 0
 
             for feature_value in feature_values:
-                #print(f'examining feature value {feature_value} for feature {feature}')
                 feature_value_entropy = 0
 
                 classes = self.y[self.x[:, feature] == feature_value]
-                #print(classes)
                 total_examples_with_feature_value = len(classes)
                 classes_values = set(classes)
 
                 for class_value in classes_values:
-                    #print(f'examining class value {class_value}')
-                    #print(f'classes == class value = {classes == class_value}')
                     num_exampes_with_feature_value_and_class_value = sum(classes == class_value)
                     class_probability = num_exampes_with_feature_value_and_class_value / total_examples_with_feature_value
                     my_entropy = -class_probability * log2(class_probability)
                     feature_value_entropy += my_entropy
 
-                    #print(f'for feature value {feature_value} class {class_value} has class_probability = {class_probability}')
-                    #print(f' num_exampes_with_feature_value {feature_value} and_class_value {class_value} is {num_exampes_with_feature_value_and_class_value} total_examples_with_feature_value = {total_examples_with_feature_value}')
                 
                 feature_value_ratio = total_examples_with_feature_value / total_num_of_examples
                 total_feature_entropy += feature_value_ratio * feature_value_entropy
-                #print(f'feature_value_ratio = {feature_value_ratio}')
-                #print(f'feature_value_entropy = {feature_value_entropy}')
-            #print('\n')
+
             feature_entropies[feature] = total_feature_entropy
-        
-        #print(f'features entropies = {feature_entropies}')
 
         feature_with_min_entropy = min(feature_entropies, key=feature_entropies.get)
 
-        self.my_split_atribute = feature_with_min_entropy
+        self.my_split_attribute = feature_with_min_entropy
 
     
     def find_best_feature_for_split_gini(self):
+        '''
+        Finds best attribute for splitting based on Gini impurity
+        Sets self.my_split_attribute to chosen attribute for splitting
+        '''
         feature_gini_impurities = {}
 
         for feature in self.features:
@@ -174,10 +184,14 @@ class BigNode(object):
 
         feature_with_min_gini_impurity = min(feature_gini_impurities, key=feature_gini_impurities.get)
 
-        self.my_split_atribute = feature_with_min_gini_impurity
+        self.my_split_attribute = feature_with_min_gini_impurity
 
 
     def find_best_feature_for_classification_error(self):
+        '''
+        Finds best attribute for splitting based on classification error
+        Sets self.my_split_attribute to chosen attribute for splitting
+        '''
         feature_classification_errors = {}
 
         for feature in self.features:
@@ -206,10 +220,13 @@ class BigNode(object):
 
         feature_with_min_classification_error = min(feature_classification_errors, key=feature_classification_errors.get)
 
-        self.my_split_atribute = feature_with_min_classification_error
+        self.my_split_attribute = feature_with_min_classification_error
     
     def find_best_feature_for_split_chi(self):
-
+        '''
+        Finds best attribute for splitting based on chi-squared test
+        Sets self.my_split_attribute to chosen attribute for splitting
+        '''
         feature_chi_values = {}
 
         for feature in self.features:
@@ -246,7 +263,7 @@ class BigNode(object):
         
         feature_with_min_chi_value = min(feature_chi_values, key=feature_chi_values.get)
 
-        self.my_split_atribute = feature_with_min_chi_value
+        self.my_split_attribute = feature_with_min_chi_value
     
     def find_best_feature_for_split(self, metric):
         if metric == 'entropy':
@@ -265,18 +282,30 @@ class BigNode(object):
             raise Exception("Valid values for metric are 'entropy', 'gini', 'chi', and 'classification_error'")
 
     def split_by_feature(self):
-        feature_values = set(self.x[:, self.my_split_atribute])
+        '''
+        Splits the node into children based on values of self.my_split_attribute
+        This method can only be called after find_best_feature_for_split which finds best split attribute
+
+        Each child represents one of the attributes values
+        Each child inherits only the examples with that attribute value
+        Each child inherits examples with all attributes except the attribute used for splitting (because we cannot use the same attribute for splitting more than once)
+        Each child knows its depth
+
+        Parent stores reference to child in a dictionary where key is feature value
+        Parent stores how many examples are given to each child
+        '''
+        feature_values = set(self.x[:, self.my_split_attribute])
 
         child_features = list(self.features)
-        child_features.remove(self.my_split_atribute)
+        child_features.remove(self.my_split_attribute)
         number_of_examples = len(self.x)
 
         for feature_value in feature_values:
-            indexes = np.where(self.x[:, self.my_split_atribute] == feature_value)
+            indexes = np.where(self.x[:, self.my_split_attribute] == feature_value)
             child_x = self.x[indexes]
             child_y = self.y[indexes]
             
-            child = BigNode(child_x, child_y, child_features, depth=self.depth+1)
+            child = Node(child_x, child_y, child_features, depth=self.depth+1)
             self.children[feature_value] = child
         
         values, counts = np.unique(self.y, return_counts=True)
@@ -286,12 +315,17 @@ class BigNode(object):
         return self.children
 
     def get_child(self, x):
-        global not_observed
+        '''
+        Used for decision-nodes only (cannot be used for leaf nodes)
+        Returns child with the feature attribute value equal to x.feature_attribute_value
+        If there isn't such child then returns random child where children with more examples
+            in them have higher probability in being chosen
+        '''
 
         if self.is_terminal:
             raise Exception("Leaf nodes have no children")
         
-        value = x[self.my_split_atribute]
+        value = x[self.my_split_attribute]
         if value in self.children:
             child = self.children[value]
             return child
@@ -308,7 +342,6 @@ class DecisionTree(object):
     def __init__(self, impurity_function='gini', discretization_method='dynamic', max_depth=-1, min_leaf_size=-1, number_of_discr_classes=3, pruning_method=None):
         self.tree_root = None 
         self.impurity_function = impurity_function
-        self.number_to_feature_value_mapping = {}
         self.column_index_to_feature_name_mapping = {}
         self.number_to_label_value_mapping = {}
         self.discretization_method = discretization_method
@@ -316,27 +349,45 @@ class DecisionTree(object):
         self.max_depth = max_depth
         self.min_leaf_size = min_leaf_size
         self.numerical_to_categorical_values_mappings = {}
-        self.feature_value_to_number_mapping = {}
         self.feature_values = {}
         self.pruning_method = pruning_method
 
     
     def display_tree(self, path):
+        '''
+        Saves a .png image of a tree to a path from argument path
+        '''
 
+        colors = ['green', 'red', 'blue', 'purple', 'brown']
+        classes = sorted(list((set(self.tree_root.y))))
+        class_to_color_map = {}
+
+        for i, class_name in enumerate(classes):
+            class_to_color_map[class_name] = colors[i % len(colors)]
+
+        
         if self.tree_root is None:
             raise Exception("Tree must be trained first in order to be displayed")
 
         node = self.tree_root
         if node.is_terminal:
-            label = str(self.number_to_label_value_mapping[node.my_class])
-            color = 'green'
+            label = str(node.my_class)
+            color = class_to_color_map[node.my_class]
+            #color = 'green'
         else:
-            label = str(self.column_index_to_feature_name_mapping[node.my_split_atribute])
+            label = str(self.column_index_to_feature_name_mapping[node.my_split_attribute])
             color = 'gold'
 
-            label += '\n' + str(node.x.shape[0])
+        # label += '\n' + str(node.x.shape[0])
+        class_label = ''
+        for i, class_name in enumerate(classes):
+            class_num = np.sum(node.y == class_name)
+            class_label += f'{class_name} : {class_num}'
+            if i != len(classes) - 1:
+                class_label += ', '
+        label += f'\n {class_label}'
         G = pydot.Dot(graph_type='digraph')
-        G.add_node(pydot.Node(name='0', label=label, style='filled', color=color))
+        G.add_node(pydot.Node(name='0', label=label, style='filled', color=color, shape='box'))
 
         stack = [(self.tree_root, 0)]
         
@@ -349,79 +400,66 @@ class DecisionTree(object):
                 child = node.children[child_key]
                 index += 1
                 if child.is_terminal:
-                    label = str(self.number_to_label_value_mapping[child.my_class])
-                    color = 'green'
+                    label = str(child.my_class)
+                    color = class_to_color_map[child.my_class]
+                    #color = 'green'
                 else:
                     stack.append((child, index))
-                    label = str(self.column_index_to_feature_name_mapping[child.my_split_atribute])
+                    label = str(self.column_index_to_feature_name_mapping[child.my_split_attribute])
                     color = 'gold'
                 
-                label += '\n' + str(child.x.shape[0])
-                G.add_node(pydot.Node(name=str(index), label=label, style='filled', color=color))
-                edge_label = self.number_to_feature_value_mapping[node.my_split_atribute][child_key]
+                #print(label)
+                #label += '\n' + str(child.x.shape[0])
+                class_label = ''
+                for i, class_name in enumerate(classes):
+                    class_num = np.sum(child.y == class_name)
+                    class_label += f'{class_name} : {class_num}'
+                    if i != len(classes) - 1:
+                        class_label += ', '
+                label += f'\n {class_label}'
+                G.add_node(pydot.Node(name=str(index), label=label, style='filled', color=color, shape='box'))
+                edge_label = child_key
                 G.add_edge(pydot.Edge(str(parent_index), str(index), label=edge_label))
                 
         
         G.write_png(path)
 
 
-    def change_feature_values_into_numbers(self, features):
+    def change_column_names_to_numbers(self, features):
+        '''
+        Changes column names from strings to numbers:
+            For example: ['height', 'weight', 'bmi'] --> [0, 1, 2]
+        Pairs of column name and number are stored in dict so it can be reversed
+            For example: column_index_to_feature_name_mapping['height'] = 0
+        '''
         
-        number_to_feature_value_mapping = {}
         column_index_to_feature_name_mapping = {}
-        feature_value_to_number_mapping = {}
-
         for column_index, column_name in enumerate(features.columns):
-        
-            values = self.feature_values[column_name]
             column_index_to_feature_name_mapping[column_index] = column_name
 
-            number_to_value_mapping = {}
-            value_to_number_mapping = {}
-
-            patches = []
-            for value_number, value in enumerate(values):
-                patch_indexes = features[column_name] == value
-                patches.append((patch_indexes, value_number))
-                number_to_value_mapping[value_number] = value
-                value_to_number_mapping[value] = value_number
-            
-            for patch in patches:
-                patch_indexes, value_number = patch
-                features.loc[patch_indexes, column_name] = value_number
-
-            number_to_feature_value_mapping[column_index] = number_to_value_mapping
-            feature_value_to_number_mapping[column_index] = value_to_number_mapping
-                
-        self.feature_value_to_number_mapping = feature_value_to_number_mapping
-        self.number_to_feature_value_mapping = number_to_feature_value_mapping
         self.column_index_to_feature_name_mapping = column_index_to_feature_name_mapping
-
-        
-    def change_label_values_into_numbers(self, features):
-        number_to_label_value_mapping = {}
-
-        values = set(features)
-        values = sorted(list(values))
-
-        patches = []
-        for value_number, value in enumerate(values):
-            patch_indexes = features == value
-            patches.append((patch_indexes, value_number))
-            number_to_label_value_mapping[value_number] = value
-
-        for patch in patches:
-            patch_indexes, value_number = patch
-            features[patch_indexes] = value_number
-        
-        self.number_to_label_value_mapping = number_to_label_value_mapping
     
         
     def split_to_intervals_with_same_length(self, features_df, column_name, number_of_discr_classes):
-        feature_column = features_df[column_name]
+        '''
+        Discretization of attribute in column column_name to number_of_discr_classes values
+        This discretization is done so each resulting interval has the same size
+        For example values of height between 150cm and 210cm would be split into 3 intervals as:
+            ['shorter than 170cm', 'between 170cm and 190cm', 'taller than 190cm']
 
+        All feature values are stored in dictionary for each column:
+        For example:
+            feature_values['height'] = ['shorter than 170cm', 'between 170cm and 190cm', 'taller than 190cm']
+        
+        All borders of feature values are stored in dict for each column
+        For example:
+            numerical_to_categorical_values_mappings['height'] = [170, 190] (as values 170 and 190 are used as borders of intervals) 
+        '''
+        feature_column = features_df[column_name]
         min_value = feature_column.min()
         max_value = feature_column.max()
+
+        # print(f'min = {min_value} max = {type(max_value)} classmin = {min_value} classmax = {type(max_value)}')
 
         split_vectors = []
         split_size = (max_value - min_value) / number_of_discr_classes
@@ -465,7 +503,18 @@ class DecisionTree(object):
     
                 
     def split_to_intervals_with_same_size(self, features_df, column_name, number_of_discr_classes):
- 
+        '''
+        Discretization of attribute in column column_name to number_of_discr_classes intervals
+        This discretization is done so each resulting interval will have the same number of examples
+
+        All feature values are stored in dictionary for each column:
+        For example:
+            feature_values['height'] = ['shorter than 170cm', 'between 170cm and 190cm', 'taller than 190cm']
+        
+        All borders of feature values are stored in dict for each column
+        For example:
+            numerical_to_categorical_values_mappings['height'] = [170, 190] (as values 170 and 190 are used as borders of intervals) 
+        '''
         features_column = features_df[column_name]
 
         sorted_array = np.sort(features_column)
@@ -517,6 +566,18 @@ class DecisionTree(object):
         self.numerical_to_categorical_values_mappings[column_name] = splitting_borders
         
     def dynamic_split(self, features_df, column_name, labels):
+        '''
+        Discretization of attribute in column column_name to
+        This discretization is done as explained in paper Decision trees: an overview and their use in medicine (SI-2000)
+
+        All feature values are stored in dictionary for each column:
+        For example:
+            feature_values['height'] = ['shorter than 170cm', 'between 170cm and 190cm', 'taller than 190cm']
+        
+        All borders of feature values are stored in dict for each column
+        For example:
+            numerical_to_categorical_values_mappings['height'] = [170, 190] (as values 170 and 190 are used as borders of intervals) 
+        '''
         features_np = np.array(features_df[column_name]).flatten()
 
         m = features_np.shape[0]
@@ -629,7 +690,12 @@ class DecisionTree(object):
         self.numerical_to_categorical_values_mappings[column_name] = splitting_borders
 
     def change_continuous_to_categorical_values(self, features, labels, number_of_discr_classes):
-
+        '''
+        Changes all columns with continuous values to categorical values
+        Column is consiered continuous if it has more than 5 distinct values
+        For example:
+            height = [150, 155, 160, 175, 180, 185, 190, 195]
+        '''
         for column_index, column_name in enumerate(features.columns):
 
             values = set(features[column_name])
@@ -644,6 +710,10 @@ class DecisionTree(object):
                     self.dynamic_split(features, column_name, labels)
 
     def change_new_data_continuous_to_categorical_values(self, features):
+        '''
+        This method is used to change the values of features in testing dataset 
+        from continuous to categorical in the same way that has been done in training dataset
+        '''
         for column_name in self.numerical_to_categorical_values_mappings:
             border_values = self.numerical_to_categorical_values_mappings[column_name]
 
@@ -655,17 +725,14 @@ class DecisionTree(object):
 
                 if border_index == 0:
                     group_indexes = features[column_name] <= right_border
-                    #features.loc[group_indexes, column_name] = f'x <= {right_border}'
                     patches.append((group_indexes, f'x <= {right_border}'))
                 elif border_index == len(border_values) - 1:
                     group_indexes = features[column_name] > right_border
                     if self.discretization_method == 'dynamic':
                         group_indexes = features[column_name] >= right_border
-                    #features.loc[group_indexes, column_name] = f'x >= {left_border}'
                     patches.append((group_indexes, f'x > {right_border}'))
                 else:
                     group_indexes = np.logical_and(left_border < features[column_name], features[column_name] <= right_border)
-                    #features.loc[group_indexes, column_name] = f'{left_border} <= x <= {right_border}'
                     patches.append((group_indexes, f'{left_border} < x <= {right_border}'))
 
                 left_border = right_border
@@ -674,31 +741,8 @@ class DecisionTree(object):
                 group_indexes, value = patch
                 features.loc[group_indexes, column_name] = value
     
-    def change_new_data_feature_values_into_numbers(self, x):
-        for column_index, column_name in enumerate(x.columns):
-            feature_values_to_numbers = self.feature_value_to_number_mapping[column_index]
-            #print(x[column_name])
-            #print('\n' + column_name)
-            patches = []
-            for feature_value in feature_values_to_numbers:
-                number = feature_values_to_numbers[feature_value]
-                group_indexes = x[column_name] == feature_value
-                
-                #print(feature_value)
-                patches.append((group_indexes, number))
-          
 
-            for patch in patches:
-                group_indexes, value = patch
-                x.loc[group_indexes, column_name] = value 
-                #print(x.loc[group_indexes, column_name])
-                #print()
-
-    
-
-    
-            
-    def pessimistic_error_prunning(self):
+    def pessimistic_error_pruning(self):
 
         deq = deque()
 
@@ -734,7 +778,6 @@ class DecisionTree(object):
             standard_error = sqrt(node_error * (total_quantity - node_error) / total_quantity)
 
             if node_error < error_sum + standard_error:
-                print("prune")
                 node.set_class_to_most_common_label()
             
             else:
@@ -774,9 +817,7 @@ class DecisionTree(object):
             if new_error <= error_on_pruning_set:
                 error_on_pruning_set = new_error
                 node.children.clear()
-                print("pruning")
             else:
-                print(f'old error is {error_on_pruning_set} while new error is {new_error}')
                 node.is_terminal = False
 
             
@@ -797,8 +838,9 @@ class DecisionTree(object):
 
         #print(data)
 
-        self.change_feature_values_into_numbers(data)
-        self.change_label_values_into_numbers(labels)
+        self.change_column_names_to_numbers(data)
+
+        
         data, labels = np.array(data), np.array(labels)
 
 
@@ -806,7 +848,8 @@ class DecisionTree(object):
             features = [0]
         else:    
             features = list(range(data.shape[1]))
-        tree_root = BigNode(data, labels, features, depth=0)
+
+        tree_root = Node(data, labels, features, depth=0)
     
         big_node_stack = [tree_root]
     
@@ -824,13 +867,14 @@ class DecisionTree(object):
     
         self.tree_root = tree_root
 
+        self.display_tree("pydot_graph_pre_prune.png")
+
         if self.pruning_method != None:
+            
             if self.pruning_method == "reduced_error":
-                pass
-                #self.reduced_error_pruning()
+                self.reduced_error_pruning()
             elif self.pruning_method == "pessimistic_error":
-                #self.pessimistic_error_prunning()
-                print("nothing")
+                self.pessimistic_error_pruning()
             else:
                 pass
                 #raise Exception("Only possible pruning methods are: reduced_error")
@@ -852,8 +896,6 @@ class DecisionTree(object):
         data = features.copy()
         
         self.change_new_data_continuous_to_categorical_values(data)
-        #print(data)
-        self.change_new_data_feature_values_into_numbers(data)
         
         data = np.array(data)
 
@@ -861,7 +903,8 @@ class DecisionTree(object):
         for data_point in data:
             data_point_class = self.get_class_for_data_point(data_point)
             #print(data_point_class)
-            data_point_class_value = str(self.number_to_label_value_mapping[data_point_class])
+            # data_point_class_value = str(self.number_to_label_value_mapping[data_point_class])
+            data_point_class_value = str(data_point_class)
             predictions.append(data_point_class_value)
         
         return predictions
@@ -889,19 +932,25 @@ class DecisionTree(object):
 
 def main():
     np.random.seed(1302)
-    data_path = "train.csv"
-    features, labels = just_load_data(data_path)
+    data_path = "masctodos.csv"
 
-    features.drop('p_id', axis=1, inplace=True)
+    #features, labels = load_data(data_path, 'diagnosis', 'id')
+    features, labels = load_data(data_path, 'hyper', separator=';', id_column_name='id')
+
+    # features.drop('id', axis=1, inplace=True)
 
     train_features, train_labels, test_features, test_labels = random_test_train_split(features, labels, test_percentage=20)
 
-    decision_tree = DecisionTree(impurity_function='gini', min_leaf_size=-1, discretization_method='same_size', max_depth=-1, number_of_discr_classes=3, pruning_method="nista")
+    decision_tree = DecisionTree(impurity_function='gini', min_leaf_size=-1, discretization_method='same_size', max_depth=-1, number_of_discr_classes=3, pruning_method='nista')
     decision_tree.train_tree(train_features, train_labels)
+
     decision_tree.display_tree("pydot_graph_pre_prune.png")
     print('krecem pessimistic')
-    decision_tree.pessimistic_error_prunning()
+    
+    decision_tree.pessimistic_error_pruning()
     print('zavrsio pessimistic')
+
+    np.random.seed(1302)
     decision_tree.display_tree("pydot_graph_post_prune.png")
 
     predictions = decision_tree.get_predictions(train_features)
@@ -911,21 +960,17 @@ def main():
 
     print(f'test score = {1 - decision_tree.get_error(predictions, test_labels)}')
 
-    return
-    #predictions = decision_tree.get_predictions(test_features)
-    #print(f'test score = {1 - decision_tree.get_error(predictions, test_labels)}')
-    global not_observed
-    print(not_observed)
     
-    train_labels=train_labels.astype('int')
-    test_labels=test_labels.astype('int')
-    sklearn_tree = DecisionTreeClassifier(criterion='gini', random_state=1302)
-    sklearn_tree.fit(train_features, train_labels)
-    print(f'train score = {sklearn_tree.score(train_features, train_labels)}')
+    #print(train_labels)
+    #sklearn_tree = DecisionTreeClassifier(criterion='gini', random_state=1302)
+    #sklearn_tree.fit(train_features, train_labels)
+    #print(f'train score = {sklearn_tree.score(train_features, train_labels)}')
     #print(f'test score = {sklearn_tree.score(test_features, test_labels)}')
-    #print(sklearn_tree.get_params())
-    #tree.plot_tree(sklearn_tree)
-    #plt.show()
+    ##print(sklearn_tree.get_params())
+    #plt.figure(figsize=(12,12)) 
+    #tree.plot_tree(sklearn_tree, fontsize=10)
+    #plt.savefig("skelarn_tree.png")
+    ##plt.show()
 
     
 if __name__=="__main__":
