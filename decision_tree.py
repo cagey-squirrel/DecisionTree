@@ -75,7 +75,9 @@ def random_test_train_split(features, labels, test_percentage=20):
 
 class Node(object):
 
-    def __init__(self, x, y, features, depth, index=0):
+    index = 0
+
+    def __init__(self, x, y, features, depth):
         self.x = x
         self.y = y
         self.features = features
@@ -84,7 +86,8 @@ class Node(object):
         self.my_split_attribute = None
         self.children = {}
         self.children_quantities = {}
-        self.index = index
+        self.index = Node.index
+        Node.index += 1
         self.depth = depth
 
 
@@ -115,6 +118,43 @@ class Node(object):
 
         self.my_class = values[ind]
     
+    def get_classification_error(self):
+        '''
+        Returns the number of missclassified examples in this node
+        '''
+        values, counts = np.unique(self.y, return_counts=True)
+        ind = np.argmax(counts)
+
+        num_of_elems_in_most_common_class = counts[ind]
+        num_of_elems_in_other_classes = self.y.shape[0] - num_of_elems_in_most_common_class
+        
+        return num_of_elems_in_other_classes
+    
+    def get_number_of_leafs_and_classification_error_in_them(self):
+        '''
+        Searches for the number of leafs that the node has
+        Calculates the sum of all missclassified examples in the leafs
+        '''
+
+        deq = deque()
+        deq.append(self)
+
+        sum_of_missclassified_examples = 0
+        number_of_leafs = 0
+
+        while len(deq):
+            node = deq.popleft()
+
+            if node.is_terminal:
+                number_of_leafs += 1
+                sum_of_missclassified_examples += node.get_classification_error()
+            else:
+                for child in node.children.values():
+                    deq.append(child)
+            
+        return sum_of_missclassified_examples, number_of_leafs
+
+
     def find_best_feature_for_split_entropy(self):
         '''
         Finds best attribute for splitting based on entropy
@@ -389,10 +429,14 @@ class DecisionTree(object):
         G = pydot.Dot(graph_type='digraph')
         G.add_node(pydot.Node(name='0', label=label, style='filled', color=color, shape='box'))
 
+        if self.tree_root.is_terminal:
+            G.write_png(path)
+            return
+
         stack = [(self.tree_root, 0)]
         
         index = 0
-        while(len(stack)):
+        while(len(stack)): 
 
             node, parent_index = stack.pop()
 
@@ -741,6 +785,122 @@ class DecisionTree(object):
                 group_indexes, value = patch
                 features.loc[group_indexes, column_name] = value
     
+    def prune_node_by_index(self, index):
+        '''
+        Prunes node with a given index from the tree
+        '''
+
+        deq = deque()
+        deq.append(self.tree_root)
+
+        while len(deq):
+            node = deq.popleft()
+            if node.index == index:
+                #print(f"pruned {index}")
+                node.set_class_to_most_common_label()
+                return
+            for child in node.children.values():
+                deq.append(child)
+        
+    
+
+    def reset_prunning(self):
+        '''
+        This function resets prunning
+        If a node is declared as terminal but has children it means it was pruned
+        This function puts its state back to not being terminal
+        '''
+    
+        deq = deque()
+        deq.append(self.tree_root)
+
+        while len(deq):
+            node = deq.popleft()
+            if node.is_terminal and len(node.children):
+                node.is_terminal = False
+            for child in node.children.values():
+                deq.append(child)
+    
+    def print_all_nodes_in_tree(self):
+        deq = deque()
+        deq.append(self.tree_root)
+        num = 0
+
+        while len(deq):
+            num += 1
+            node = deq.popleft()
+            #print(node.index, end=" ")
+
+            if not node.is_terminal:
+                for child in node.children.values():
+                    deq.append(child)
+        
+        print(f'num = {num}')
+
+
+    def cost_complexity_prunning(self):
+        
+        prunning_indexes_list = []
+
+
+        while(not self.tree_root.is_terminal):
+            #self.print_all_nodes_in_tree()
+            #input()
+            deq = deque()
+            deq.append(self.tree_root)
+
+            min_alpha = float('inf')
+            min_alpha_index = -1
+
+            while len(deq):
+
+                node = deq.popleft()
+
+                if node.is_terminal:
+                    continue
+                
+                my_error_rate = node.get_classification_error()
+                leafs_error_rate, num_of_leafs = node.get_number_of_leafs_and_classification_error_in_them()
+
+                alfa = (my_error_rate - leafs_error_rate) / num_of_leafs
+
+                if alfa < min_alpha:
+                    min_alpha = alfa
+                    min_alpha_index = node.index
+                
+                for child in node.children.values():
+                    deq.append(child)
+
+            self.prune_node_by_index(min_alpha_index)
+            prunning_indexes_list.append(min_alpha_index)
+        
+        print("finished pruning list")
+        # Reset pruning so the tree is whole again
+        self.reset_prunning()
+        self.print_all_nodes_in_tree()
+        min_pruning_error = float('inf')
+        min_pruning_index = -1
+
+        for i, index_for_pruning in enumerate(prunning_indexes_list):
+            self.prune_node_by_index(index_for_pruning)
+            self.print_all_nodes_in_tree()
+            
+            predictions = self.get_predictions(self.pruning_features)
+            pruning_error = self.get_error(predictions, self.pruning_labels)
+            print(f'current min error {min_pruning_error} and now is {pruning_error}')
+            if pruning_error <= min_pruning_error:
+                min_pruning_error = pruning_error
+                min_pruning_index = i
+            #input()
+        
+        self.reset_prunning()
+        
+        index = 0
+        while(index <= min_pruning_index):
+            index_for_pruning = prunning_indexes_list[index]
+            self.prune_node_by_index(index_for_pruning)
+            index += 1
+
 
     def pessimistic_error_pruning(self):
 
@@ -826,7 +986,7 @@ class DecisionTree(object):
         data = x.copy()
         labels = y.copy()
 
-        if self.pruning_method != None:
+        if self.pruning_method in ["cost_complexity", "reduced_error"]:
             pruning_data_percentage = 20
             pruning_data_size = int(pruning_data_percentage / 100 * data.shape[0])
             self.pruning_features = data.iloc[:pruning_data_size]
@@ -875,9 +1035,10 @@ class DecisionTree(object):
                 self.reduced_error_pruning()
             elif self.pruning_method == "pessimistic_error":
                 self.pessimistic_error_pruning()
+            elif self.pruning_method == "cost_complexity":
+                self.cost_complexity_prunning()
             else:
-                pass
-                #raise Exception("Only possible pruning methods are: reduced_error")
+                raise Exception("Only possible pruning methods are: reduced_error, pessimistic_error and cost_complexity")
     
     def get_class_for_data_point(self, x):
         
@@ -932,23 +1093,23 @@ class DecisionTree(object):
 
 def main():
     np.random.seed(1302)
-    data_path = "masctodos.csv"
+    data_path = "train.csv"
 
     #features, labels = load_data(data_path, 'diagnosis', 'id')
-    features, labels = load_data(data_path, 'hyper', separator=';', id_column_name='id')
+    features, labels = load_data(data_path, 'diabetes', separator=',', id_column_name='p_id')
 
     # features.drop('id', axis=1, inplace=True)
 
     train_features, train_labels, test_features, test_labels = random_test_train_split(features, labels, test_percentage=20)
 
-    decision_tree = DecisionTree(impurity_function='gini', min_leaf_size=-1, discretization_method='same_size', max_depth=-1, number_of_discr_classes=3, pruning_method='nista')
+    decision_tree = DecisionTree(impurity_function='gini', min_leaf_size=-1, discretization_method='same_size', max_depth=-1, number_of_discr_classes=3, pruning_method='cost_complexity')
     decision_tree.train_tree(train_features, train_labels)
 
-    decision_tree.display_tree("pydot_graph_pre_prune.png")
-    print('krecem pessimistic')
+    #decision_tree.display_tree("pydot_graph_pre_prune.png")
+    #print('krecem pessimistic')
     
-    decision_tree.pessimistic_error_pruning()
-    print('zavrsio pessimistic')
+    #decision_tree.pessimistic_error_pruning()
+    #print('zavrsio pessimistic')
 
     np.random.seed(1302)
     decision_tree.display_tree("pydot_graph_post_prune.png")
